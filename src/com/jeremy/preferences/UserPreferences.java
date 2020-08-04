@@ -1,7 +1,17 @@
 package com.jeremy.preferences;
 
+import java.awt.Color;
+import java.awt.Insets;
+import java.awt.Rectangle;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Optional;
 import java.util.prefs.Preferences;
+
+import com.jeremy.persist.ColorPreferenceHandler;
+import com.jeremy.persist.InsetsPreferenceHandler;
+import com.jeremy.persist.ListPreferenceHandler;
+import com.jeremy.persist.RectanglePreferenceHandler;
 
 public class UserPreferences {
 
@@ -11,6 +21,10 @@ public class UserPreferences {
 
 	public UserPreferences(Class<?> save) {
 		preferences = Preferences.userNodeForPackage(save);
+		register(Color.class, new ColorPreferenceHandler());
+		register(Insets.class, new InsetsPreferenceHandler());
+		register(List.class, new ListPreferenceHandler());
+		register(Rectangle.class, new RectanglePreferenceHandler());
 	}
 
 	public void put(String key, Object value) {
@@ -30,7 +44,11 @@ public class UserPreferences {
 			CompoundPreferenceHandler<Object> handler = handlers.get(value.getClass());
 			handler.write(key, this, value);
 		} else {
-			throw new IllegalArgumentException("no compound preference handler for class: " + value.getClass().getName());
+			Optional<Class<?>> optionalHandler = handlers.keySet().stream().filter(other -> other.isAssignableFrom(value.getClass())).findAny();
+			if (optionalHandler.isPresent()) {
+				CompoundPreferenceHandler<Object> handler = handlers.get(optionalHandler.get());
+				handler.write(key, this, value);
+			} else throw new IllegalArgumentException("no compound preference handler for class: " + value.getClass().getName());
 		}
 	}
 
@@ -48,9 +66,16 @@ public class UserPreferences {
 		} else if (valueClass == Double.class) {
 			return valueClass.cast(preferences.getDouble(key, defaultValue == null ? 0.0 : (Double) defaultValue));
 		} else if (handlers.containsKey(valueClass)) {
-			return valueClass.cast(handlers.get(valueClass).read(key, this));
+			CompoundPreferenceHandler<Object> handler = handlers.get(valueClass);
+			if (!handler.contains(key, this)) return defaultValue;
+			return valueClass.cast(handler.read(key, this));
 		} else {
-			throw new IllegalArgumentException("no compound preference handler for class: " + valueClass.getName());
+			Optional<Class<?>> optionalHandler = handlers.keySet().stream().filter(other -> other.isAssignableFrom(valueClass)).findAny();
+			if (optionalHandler.isPresent()) {
+				CompoundPreferenceHandler<Object> handler = handlers.get(optionalHandler.get());
+				if (!handler.contains(key, this)) return defaultValue;
+				return valueClass.cast(handler.read(key, this));
+			} else throw new IllegalArgumentException("no compound preference handler for class: " + valueClass.getName());
 		}
 	}
 
@@ -62,8 +87,13 @@ public class UserPreferences {
 		}
 	}
 
+	public boolean contains(String key, Class<?> valueClass) {
+		if (handlers.containsKey(valueClass)) return handlers.get(valueClass).contains(key, this);
+		return preferences.get(key, null) != null;
+	}
+
 	@SuppressWarnings("unchecked")
-	public <V> void register(Class<V> valueClass, CompoundPreferenceHandler<V> handler) {
+	public <V> void register(Class<? extends V> valueClass, CompoundPreferenceHandler<? extends V> handler) {
 		handlers.put(valueClass, (CompoundPreferenceHandler<Object>) handler);
 	}
 
